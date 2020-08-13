@@ -4,7 +4,7 @@
 
   <groupId>org.yah.tools</groupId>
   <artifactId>index-support</artifactId>
-  <version>1.1.0</version>
+  <version>1.1.1-SNAPSHOT</version>
   <packaging>pom</packaging>
   <name>Index support</name>
   
@@ -15,7 +15,7 @@
 
   <scm>
     <developerConnection>scm:git:git@github.com:mflament/index-support.git</developerConnection>
-    <tag>index-support-1.1.0</tag>
+    <tag>HEAD</tag>
   </scm>
 
   <dependencyManagement>
