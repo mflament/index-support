@@ -13,7 +13,11 @@ import org.hamcrest.Matchers;
 import org.hamcrest.TypeSafeMatcher;
 import org.junit.Test;
 import org.yah.tools.index.lucene.annotations.IndexedFieldType;
-import org.yah.tools.index.lucene.mapper.*;
+import org.yah.tools.index.lucene.mapper.DefaultDocumentMapper;
+import org.yah.tools.index.lucene.mapper.DefaultDocumentMapperTest;
+import org.yah.tools.index.lucene.mapper.IndexedField;
+import org.yah.tools.index.lucene.mapper.TestEntity;
+import org.yah.tools.index.lucene.mapper.TestEntity.NestedBean;
 
 import java.time.ZoneOffset;
 import java.util.*;
@@ -40,19 +44,23 @@ public class IndexAnnotationParserTest {
 
         final DefaultDocumentMapper<TestEntity> mapper = parser.parse();
 
-        assertThat(analyzers.entrySet(), hasSize(5));
+        assertThat(analyzers.entrySet(), hasSize(8));
         assertThat(analyzers.get("firstName"), instanceOf(KeywordAnalyzer.class));
         assertThat(analyzers.get("lastName"), instanceOf(KeywordAnalyzer.class));
         assertThat(analyzers.get("colors"), instanceOf(StandardAnalyzer.class));
         assertThat(analyzers.get("animals"), instanceOf(StandardAnalyzer.class));
         assertThat(analyzers.get("fullName"), instanceOf(FrenchAnalyzer.class));
+        assertThat(analyzers.get("nestedBean1.id"), instanceOf(KeywordAnalyzer.class));
+        assertThat(analyzers.get("nestedBeer2.id"), instanceOf(KeywordAnalyzer.class));
+        assertThat(analyzers.get("valid"), instanceOf(KeywordAnalyzer.class));
 
         final Collection<IndexedField<TestEntity>> indexedFields = DefaultDocumentMapperTest.getIndexedFields(mapper);
         final Set<String> names = indexedFields.stream()
                 .map(IndexedField::getName)
                 .collect(Collectors.toSet());
         assertThat(names, containsInAnyOrder("firstName", "lastName", "colors",
-                "animals", "theSize", "size", "birthDate", "fullName", "sortedName"));
+                "animals", "theSize", "size", "birthDate", "fullName", "sortedName",
+                "nestedBean1.id", "nestedBean1.text", "nestedBeer2.id", "nestedBeer2.text", "valid"));
 
         TestEntity te = TestEntity.randomEntity(random);
         assertThat(mapper.getElementId(te), is(te.getId()));
@@ -60,12 +68,12 @@ public class IndexAnnotationParserTest {
         mapper.toDocument(te, document);
 
         assertThat(fields(document, "firstName"), contains(
-                indexableField(StringField.class, te.getFirstName())
+                string(te.getFirstName())
         ));
 
         final List<IndexableField> lastName = fields(document, "lastName");
         assertThat(lastName, containsInAnyOrder(List.of(
-                indexableField(StringField.class, te.getLastName()),
+                string(te.getLastName()),
                 binaryDocValue(te.getLastName())
         )));
 
@@ -79,16 +87,43 @@ public class IndexAnnotationParserTest {
         assertThat(fields(document, "birthDate"), contains(indexableField(LongPoint.class, te.getBirthDate()
                 .toEpochDay())));
 
-        assertThat(fields(document, "fullName"), contains(indexableField(TextField.class, te.getFullName())));
+        assertThat(fields(document, "fullName"), contains(text(te.getFullName())));
         assertThat(fields(document, "sortedName"), contains(sortedText(te.getFullName())));
+
+        assertThat(fields(document, "valid"), contains(string(te.isValid())));
+
+        assertNestedBean(document, "nestedBean1", te.getNestedBean1());
+        if (te.getNestedBean2() != null)
+            assertNestedBean(document, "nestedBeer2", te.getNestedBean2());
+        else {
+            assertThat(fields(document, "nestedBeer2.id"), empty());
+            assertThat(fields(document, "nestedBeer2.text"), empty());
+        }
+    }
+
+    private void assertNestedBean(Document document, String name, NestedBean expected) {
+        assertThat(fields(document, name + ".id"), contains(
+                string(expected.getId())
+        ));
+        assertThat(fields(document, name + ".text"), contains(
+                text(expected.getText())
+        ));
     }
 
     private static List<IndexableField> fields(Document document, String name) {
         return Arrays.asList(document.getFields(name));
     }
 
+    private static Matcher<? super IndexableField> string(Object value) {
+        return indexableField(StringField.class, value.toString());
+    }
+
+    private static Matcher<? super IndexableField> text(Object value) {
+        return indexableField(TextField.class, value.toString());
+    }
+
     private static List<Matcher<? super IndexableField>> strings(String... values) {
-        return Arrays.stream(values).map(v -> indexableField(StringField.class, v)).collect(Collectors.toList());
+        return Arrays.stream(values).map(IndexAnnotationParserTest::string).collect(Collectors.toList());
     }
 
     private static List<Matcher<? super IndexableField>> strings(Collection<String> values) {

@@ -1,0 +1,3 @@
+annotation parser:
+    add nested Object parsing
+    add bytebuddy as an alternative to java.lang.reflect for field accessor

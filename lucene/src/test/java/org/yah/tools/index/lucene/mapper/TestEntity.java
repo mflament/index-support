@@ -45,6 +45,11 @@ public class TestEntity {
 
         final Date birthday = faker.date().birthday(18, 115);
         te.birthDate = LocalDate.from(LocalDate.ofInstant(birthday.toInstant(), ZoneId.systemDefault()));
+
+        te.nestedBean1 = NestedBean.randomBean(faker);
+        if (faker.random().nextDouble() > 0.3) {
+            te.nestedBean2 = NestedBean.randomBean(faker);
+        }
         return te;
     }
 
@@ -72,6 +77,13 @@ public class TestEntity {
 
     @IndexField
     private LocalDate birthDate;
+
+    @Indexed
+    private NestedBean nestedBean1;
+    @Indexed("nestedBeer2")
+    private NestedBean nestedBean2;
+
+    private boolean valid;
 
     public String getId() {
         return id;
@@ -101,10 +113,48 @@ public class TestEntity {
         return birthDate;
     }
 
+    @IndexField(type = IndexedFieldType.KEYWORD)
+    public boolean isValid() {
+        return valid;
+    }
+
+    public NestedBean getNestedBean1() {
+        return nestedBean1;
+    }
+
+    public NestedBean getNestedBean2() {
+        return nestedBean2;
+    }
+
     @IndexField(type = IndexedFieldType.TEXT, analyzer = FrenchAnalyzer.class)
     @SortedField("sortedName")
     public String getFullName() {
         return firstName + " " + lastName;
     }
 
+    public static class NestedBean {
+
+        public static NestedBean randomBean(Faker faker) {
+            NestedBean res = new NestedBean();
+            res.id = faker.random().nextInt(100000000);
+            res.text = faker.beer().name();
+            return res;
+        }
+
+        @IndexField(type = IndexedFieldType.KEYWORD)
+        private int id;
+        @IndexField(type = IndexedFieldType.TEXT)
+        private String text;
+
+        public NestedBean() {
+        }
+
+        public int getId() {
+            return id;
+        }
+
+        public String getText() {
+            return text;
+        }
+    }
 }

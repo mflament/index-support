@@ -46,6 +46,8 @@ public final class IndexAnnotationParser<T> {
     private final ZoneOffset zoneOffset;
     private final Map<String, Class<? extends Analyzer>> analyzersClasses = new HashMap<>();
 
+    private final LinkedList<NestedBeanSource> beanSources = new LinkedList<>();
+
     public IndexAnnotationParser(Builder<T> builder) {
         this.builder = Objects.requireNonNull(builder.builder);
         this.analyzers = Objects.requireNonNull(builder.analyzers);
@@ -54,19 +56,25 @@ public final class IndexAnnotationParser<T> {
     }
 
     public DefaultDocumentMapper<T> parse() {
-        Class<? super T> currentType = builder.type();
-        while (currentType != Object.class) {
-            parse(currentType);
-            currentType = currentType.getSuperclass();
-        }
+        parse(builder.type());
         createAnalyzers();
         return builder.build();
     }
 
-    private void parse(Class<? super T> type) {
-        final Stream<? extends AccessibleObject> elements = Stream.concat(Arrays.stream(type.getDeclaredFields()),
-                Arrays.stream(type.getDeclaredMethods()));
-        elements.flatMap(this::createSources).forEach(AnnotatedSource::createFields);
+    private void parse(Type type) {
+        Type currentType = type;
+        while (currentType != Object.class) {
+            Class<?> typeClass = TypeUtils.getRawType(currentType, currentType);
+            if (typeClass == null)
+                    throw new IllegalArgumentException("Coundl not get class from " + currentType);
+            final Stream<? extends AccessibleObject> elements = Stream.concat(
+                    Arrays.stream(typeClass.getDeclaredFields()),
+                    Arrays.stream(typeClass.getDeclaredMethods())
+            );
+            elements.flatMap(this::createSources)
+                    .forEach(AnnotatedSource::createFields);
+            currentType = typeClass.getGenericSuperclass();
+        }
     }
 
     private Stream<AnnotatedSource> createSources(AnnotatedElement element) {
@@ -91,6 +99,13 @@ public final class IndexAnnotationParser<T> {
         sortedFields.stream()
                 .map(a -> new SortedFieldSource(element, a))
                 .forEach(sources::add);
+
+        if (sources.isEmpty()) {
+            final Indexed indexed = element.getAnnotation(Indexed.class);
+            if (indexed != null) {
+                sources.add(new NestedBeanSource(element, indexed));
+            }
+        }
         return sources.stream();
     }
 
@@ -163,6 +178,11 @@ public final class IndexAnnotationParser<T> {
     }
 
     @SuppressWarnings("unchecked")
+    private static <T, V> IndexedFieldSource<T, V> cast(IndexedFieldSource<T, ?> source) {
+        return (IndexedFieldSource<T, V>) source;
+    }
+
+    @SuppressWarnings("unchecked")
     private static <V> Function<Object, Object> mapper(Function<V, ?> mapper) {
         return o -> mapper.apply((V) o);
     }
@@ -179,19 +199,44 @@ public final class IndexAnnotationParser<T> {
         return accessor.andThen(opt -> opt.orElse(null));
     }
 
+    private IndexedFieldSource<T, ?> createFieldSource(AnnotatedElement element) {
+        IndexedFieldSource<?, ?> res;
+        if (element instanceof Method)
+            res = new MethodIndexedFieldSource<>((Method) element);
+        else
+            res = new FieldIndexedFieldSource<>((Field) element);
+
+        NestedBeanSource parent = beanSources.peekLast();
+        if (parent != null) {
+            return parent.createNestedFieldSource(res);
+        }
+
+        //noinspection unchecked
+        return (IndexedFieldSource<T, ?>) res;
+    }
+
     private abstract class AnnotatedSource {
 
         protected final IndexedFieldSource<T, ?> fieldSource;
 
+
         private AnnotatedSource(AnnotatedElement element) {
-            if (element instanceof Method)
-                fieldSource = new MethodIndexedFieldSource<>((Method) element);
-            else
-                fieldSource = new FieldIndexedFieldSource<>((Field) element);
+            this(createFieldSource(element));
+        }
+
+        private AnnotatedSource(IndexedFieldSource<T, ?> fieldSource) {
+            this.fieldSource = fieldSource;
         }
 
         public abstract void createFields();
 
+        protected final String fieldName(String... names) {
+            return Arrays.stream(names)
+                    .map(IndexAnnotationParser::trimToNull)
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .orElseGet(fieldSource::fieldName);
+        }
     }
 
     private class AnnotatedIdSource extends AnnotatedSource {
@@ -217,7 +262,11 @@ public final class IndexAnnotationParser<T> {
 
         public AnnotatedFieldSource(AnnotatedElement element, String... names) {
             super(element);
-            this.fieldName = fieldName(names);
+            final NestedBeanSource parent = beanSources.peekLast();
+            if (parent != null)
+                this.fieldName = parent.fieldName + "." + fieldName(names);
+            else
+                this.fieldName = fieldName(names);
         }
 
         @Override
@@ -317,14 +366,30 @@ public final class IndexAnnotationParser<T> {
             throw new IllegalArgumentException("Unsupported temporal type " + valueType);
         }
 
-        private String fieldName(String... names) {
-            return Arrays.stream(names)
-                    .map(IndexAnnotationParser::trimToNull)
-                    .filter(Objects::nonNull)
-                    .findFirst()
-                    .orElseGet(fieldSource::fieldName);
+    }
+
+    private class NestedBeanSource extends AnnotatedFieldSource {
+
+        public NestedBeanSource(AnnotatedElement element, Indexed indexed) {
+            super(element, indexed.name(), indexed.value());
         }
 
+        @Override
+        public void createFields() {
+            beanSources.addLast(this);
+            fieldSource.type();
+            parse(fieldSource.type());
+            beanSources.removeLast();
+        }
+
+        @Override
+        protected ResolvedFieldFactory<?> createFieldFactory(Type forType, boolean collection) {
+            throw new UnsupportedOperationException();
+        }
+
+        public IndexedFieldSource<T, ?> createNestedFieldSource(IndexedFieldSource<?, ?> fieldSource) {
+            return new NestedFieldSource<>(cast(this.fieldSource), cast(fieldSource));
+        }
     }
 
     private class IndexFieldSource extends AnnotatedFieldSource {
