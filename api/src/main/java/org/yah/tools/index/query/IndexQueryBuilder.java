@@ -22,15 +22,15 @@ public interface IndexQueryBuilder {
 
     IndexQueryBuilder sort(IndexSort sort);
 
-    IndexQueryBuilder withKeyword(String fieldName, String keyword, Occur occur, float boost);
-
-    default IndexQueryBuilder withKeyword(String fieldName, String keyword) {
-        return withKeyword(fieldName, keyword, Occur.SHOULD, 1);
+    default IndexQueryBuilder withTerm(String fieldName, String keyword) {
+        return withTerm(fieldName, keyword, Occur.SHOULD, 1);
     }
 
-    default IndexQueryBuilder withKeyword(String fieldName, String keyword, Occur occur) {
-        return withKeyword(fieldName, keyword, occur, 1);
+    default IndexQueryBuilder withTerm(String fieldName, String keyword, Occur occur) {
+        return withTerm(fieldName, keyword, occur, 1);
     }
+
+    IndexQueryBuilder withTerm(String fieldName, String term, Occur occur, float boost);
 
     IndexQueryBuilder withTerms(String fieldName, String terms, Occur occur, TermOccur termsOccur, float boost);
 

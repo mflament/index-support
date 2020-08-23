@@ -6,6 +6,7 @@ import org.apache.lucene.analysis.en.EnglishAnalyzer;
 import org.apache.lucene.analysis.fr.FrenchAnalyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.yah.tools.index.lucene.annotations.*;
+import org.yah.tools.index.lucene.annotations.IndexedField;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -50,38 +51,41 @@ public class TestEntity {
         if (faker.random().nextDouble() > 0.3) {
             te.nestedBean2 = NestedBean.randomBean(faker);
         }
+        te.nestedBean3 = NestedBean.randomBean(faker);
         return te;
     }
 
     @Id
     private String id;
 
-    @IndexField(type = IndexedFieldType.KEYWORD)
+    @IndexedField(type = IndexedFieldType.KEYWORD)
     private String firstName;
 
-    @IndexFields({
-            @IndexField(type = IndexedFieldType.KEYWORD),
-            @IndexField(type = IndexedFieldType.DOC_VALUES)
+    @IndexedFields({
+            @IndexedField(type = IndexedFieldType.KEYWORD),
+            @IndexedField(type = IndexedFieldType.DOC_VALUES)
     })
     private String lastName;
 
-    @IndexField(type = IndexedFieldType.KEYWORD, analyzer = StandardAnalyzer.class)
+    @IndexedField(type = IndexedFieldType.KEYWORD, analyzer = StandardAnalyzer.class)
     private String[] colors;
 
-    @IndexField(analyzer = KeywordAnalyzer.class)
+    @IndexedField(analyzer = KeywordAnalyzer.class)
     private List<String> animals;
 
-    @IndexField(name = "theSize")
+    @IndexedField(name = "theSize")
     @SortedField
     private int size;
 
-    @IndexField
+    @IndexedField
     private LocalDate birthDate;
 
     @Indexed
     private NestedBean nestedBean1;
     @Indexed("nestedBeer2")
     private NestedBean nestedBean2;
+    @Indexed(flatten = true)
+    private NestedBean nestedBean3;
 
     private boolean valid;
 
@@ -113,7 +117,7 @@ public class TestEntity {
         return birthDate;
     }
 
-    @IndexField(type = IndexedFieldType.KEYWORD)
+    @IndexedField(type = IndexedFieldType.KEYWORD)
     public boolean isValid() {
         return valid;
     }
@@ -126,31 +130,28 @@ public class TestEntity {
         return nestedBean2;
     }
 
-    @IndexField(type = IndexedFieldType.TEXT, analyzer = FrenchAnalyzer.class)
+    @IndexedField(type = IndexedFieldType.TEXT, analyzer = FrenchAnalyzer.class)
     @SortedField("sortedName")
     public String getFullName() {
         return firstName + " " + lastName;
+    }
+
+    public NestedBean getNestedBean3() {
+        return nestedBean3;
     }
 
     public static class NestedBean {
 
         public static NestedBean randomBean(Faker faker) {
             NestedBean res = new NestedBean();
-            res.id = faker.random().nextInt(100000000);
             res.text = faker.beer().name();
             return res;
         }
 
-        @IndexField(type = IndexedFieldType.KEYWORD)
-        private int id;
-        @IndexField(type = IndexedFieldType.TEXT)
+        @IndexedField(type = IndexedFieldType.TEXT)
         private String text;
 
         public NestedBean() {
-        }
-
-        public int getId() {
-            return id;
         }
 
         public String getText() {

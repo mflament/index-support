@@ -5,6 +5,7 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.SortField;
 import org.yah.tools.index.lucene.mapper.DocumentMapper;
+import org.yah.tools.index.lucene.mapper.IndexableFieldType;
 import org.yah.tools.index.query.IndexQuery;
 import org.yah.tools.index.query.IndexSort;
 
@@ -79,9 +80,26 @@ class LuceneIndexQuery implements IndexQuery {
         if (field.isIndexOrder())
             return SortField.FIELD_DOC;
         boolean reverse = field.getDirection() == IndexSort.IndexSortDirection.DESC;
-        return documentMapper.getSortType(field.getName())
-                .map(type -> new SortField(field.getName(), type, reverse))
-                .orElseThrow(() -> new IllegalArgumentException("Field " + field.getName() + " is not sortable"));
+        final IndexableFieldType fieldType = documentMapper.getFieldType(field.getName());
+        final SortField.Type sortType = getSortType(fieldType);
+        return new SortField(field.getName(), sortType, reverse);
+    }
+
+    private SortField.Type getSortType(IndexableFieldType fieldType) {
+        switch (fieldType) {
+            case STRING:
+                return SortField.Type.STRING;
+            case INTEGER:
+                return SortField.Type.INT;
+            case LONG:
+                return SortField.Type.LONG;
+            case FLOAT:
+                return SortField.Type.FLOAT;
+            case DOUBLE:
+                return SortField.Type.DOC;
+            default:
+                throw new IllegalArgumentException(fieldType + " is not sortable");
+        }
     }
 
 }

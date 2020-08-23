@@ -17,4 +17,6 @@ public @interface Indexed {
      * The indexed field name, default to bean property name
      */
     String name() default "";
+
+    boolean flatten() default false;
 }

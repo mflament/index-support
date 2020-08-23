@@ -4,11 +4,9 @@ import java.util.function.Function;
 
 public interface Index<T> {
 
-    IndexWriter<T> openWriter();
+    IndexWriter<T> writer();
 
-    IndexReader<T> openReader();
-
-    IndexReader<T> openReader(IndexWriter<T> writer);
+    IndexReader<T> reader();
 
     <V> void reindex(Index<V> target, Function<T, V> mapper, ProgressCallback progressCallback);
 

@@ -1,7 +1,6 @@
 package org.yah.tools.index.lucene.annotations;
 
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -23,6 +22,8 @@ public @interface Index {
     String name() default "";
 
     Class<? extends Analyzer> defaultAnalyzer() default FactoryDefault.class;
+
+    IndexedFieldType defaultTextType() default IndexedFieldType.AUTO;
 
     class FactoryDefault extends Analyzer {
         private FactoryDefault() {

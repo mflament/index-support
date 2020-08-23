@@ -36,18 +36,11 @@ public class LuceneIndexFactory {
     }
 
     public <T> LuceneIndex<T> buildIndex(Class<T> entityType) {
-        Map<String, Analyzer> fieldAnalyzers = new HashMap<>();
-        final IndexAnnotationParser.Builder<T> parserBuilder = IndexAnnotationParser.builder(entityType)
-                .withAnalyzers(fieldAnalyzers);
-        if (objectMapper != null)
-            parserBuilder.withObjectMapper(objectMapper);
-        if (defaultStringFieldType != null)
-            parserBuilder.withDefaultStringFieldType(defaultStringFieldType);
-        if (zoneOffset != null)
-            parserBuilder.withZoneOffset(zoneOffset);
         final Index annotation = entityType.getAnnotation(Index.class);
-        Analyzer defaultAnalyzer = this.defaultAnalyzer;
+
         String name = null;
+        Analyzer defaultAnalyzer = this.defaultAnalyzer;
+        IndexedFieldType defaultType = defaultStringFieldType;
         if (annotation != null) {
             if (annotation.defaultAnalyzer() != Index.FactoryDefault.class) {
                 defaultAnalyzer = IndexAnnotationParser.createAnalyzer(annotation.defaultAnalyzer());
@@ -55,9 +48,21 @@ public class LuceneIndexFactory {
             name = StringUtils.trimToNull(annotation.name());
             if (name == null)
                 name = StringUtils.trimToNull(annotation.value());
+            if (annotation.defaultTextType() != IndexedFieldType.AUTO)
+                defaultType = annotation.defaultTextType();
         }
         if (name == null)
             name = SNAKE_CASE_STRATEGY.translate(entityType.getSimpleName());
+
+        Map<String, Analyzer> fieldAnalyzers = new HashMap<>();
+        final IndexAnnotationParser.Builder<T> parserBuilder = IndexAnnotationParser.builder(entityType)
+                .withAnalyzers(fieldAnalyzers);
+        if (objectMapper != null)
+            parserBuilder.withObjectMapper(objectMapper);
+        if (zoneOffset != null)
+            parserBuilder.withZoneOffset(zoneOffset);
+        if (defaultType != null)
+            parserBuilder.withDefaultStringFieldType(defaultType);
 
         final DefaultDocumentMapper<T> documentMapper = parserBuilder.build().parse();
         PerFieldAnalyzerWrapper analyzer = new PerFieldAnalyzerWrapper(defaultAnalyzer, fieldAnalyzers);

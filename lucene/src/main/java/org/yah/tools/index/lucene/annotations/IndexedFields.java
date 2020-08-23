@@ -7,9 +7,9 @@ import java.lang.annotation.Target;
 
 @Target({ElementType.FIELD, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
-public @interface IndexFields {
+public @interface IndexedFields {
     /**
      * Alias of name()
      */
-    IndexField[] value();
+    IndexedField[] value();
 }

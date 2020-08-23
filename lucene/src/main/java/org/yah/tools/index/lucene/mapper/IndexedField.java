@@ -14,42 +14,46 @@ public class IndexedField<T> {
     public static <T, V> BiConsumer<T, Document> documentUpdater(String name,
                                                                  Function<T, ? extends V> provider,
                                                                  IndexableFieldFactory<V> factory) {
-        return (e, doc) -> {
-            final IndexableField field = factory.create(name, provider.apply(e));
+        return (value, doc) -> {
+            final IndexableField field;
+            try {
+                field = factory.create(name, provider.apply(value));
+            } catch (RuntimeException e) {
+                throw new IllegalStateException("Error creating field " + name, e);
+            }
             if (field != null)
                 doc.add(field);
         };
     }
 
     private final String name;
+    private final IndexableFieldType fieldType;
     private final BiConsumer<T, Document> documentUpdater;
-    private final SortField.Type sortType;
 
-    public <V> IndexedField(String name, Function<T, ? extends V> provider, IndexableFieldFactory<V> factory) {
-        this(name, documentUpdater(name, provider, factory), getSortType(factory));
+    public <V> IndexedField(String name,
+                            Function<T, ? extends V> provider,
+                            IndexableFieldFactory<V> factory) {
+        this(name, factory.getType(), documentUpdater(name, provider, factory));
     }
 
-    public IndexedField(String name, BiConsumer<T, Document> documentUpdater, SortField.Type sortType) {
+    public IndexedField(String name,
+                        IndexableFieldType fieldType,
+                        BiConsumer<T, Document> documentUpdater) {
         this.name = Objects.requireNonNull(name);
+        this.fieldType = Objects.requireNonNull(fieldType);
         this.documentUpdater = Objects.requireNonNull(documentUpdater);
-        this.sortType = sortType;
     }
 
     public String getName() {
         return name;
     }
 
-    public Optional<SortField.Type> getSortType() {
-        return Optional.ofNullable(sortType);
+    public IndexableFieldType getType() {
+        return fieldType;
     }
 
     public void update(T element, Document document) {
         documentUpdater.accept(element, document);
-    }
-
-    static <V> SortField.Type getSortType(IndexableFieldFactory<V> factory) {
-        return factory instanceof SortableFieldFactory ? ((SortableFieldFactory<V>) factory)
-                .getSortType() : null;
     }
 
 }

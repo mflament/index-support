@@ -44,14 +44,12 @@ public class IndexAnnotationParserTest {
 
         final DefaultDocumentMapper<TestEntity> mapper = parser.parse();
 
-        assertThat(analyzers.entrySet(), hasSize(8));
+        assertThat(analyzers.entrySet(), hasSize(6));
         assertThat(analyzers.get("firstName"), instanceOf(KeywordAnalyzer.class));
         assertThat(analyzers.get("lastName"), instanceOf(KeywordAnalyzer.class));
         assertThat(analyzers.get("colors"), instanceOf(StandardAnalyzer.class));
         assertThat(analyzers.get("animals"), instanceOf(StandardAnalyzer.class));
         assertThat(analyzers.get("fullName"), instanceOf(FrenchAnalyzer.class));
-        assertThat(analyzers.get("nestedBean1.id"), instanceOf(KeywordAnalyzer.class));
-        assertThat(analyzers.get("nestedBeer2.id"), instanceOf(KeywordAnalyzer.class));
         assertThat(analyzers.get("valid"), instanceOf(KeywordAnalyzer.class));
 
         final Collection<IndexedField<TestEntity>> indexedFields = DefaultDocumentMapperTest.getIndexedFields(mapper);
@@ -60,12 +58,11 @@ public class IndexAnnotationParserTest {
                 .collect(Collectors.toSet());
         assertThat(names, containsInAnyOrder("firstName", "lastName", "colors",
                 "animals", "theSize", "size", "birthDate", "fullName", "sortedName",
-                "nestedBean1.id", "nestedBean1.text", "nestedBeer2.id", "nestedBeer2.text", "valid"));
+                "nestedBean1.text", "nestedBeer2.text", "text", "valid"));
 
         TestEntity te = TestEntity.randomEntity(random);
         assertThat(mapper.getElementId(te), is(te.getId()));
-        Document document = new Document();
-        mapper.toDocument(te, document);
+        Document document =  mapper.toDocument(te);
 
         assertThat(fields(document, "firstName"), contains(
                 string(te.getFirstName())
@@ -96,15 +93,12 @@ public class IndexAnnotationParserTest {
         if (te.getNestedBean2() != null)
             assertNestedBean(document, "nestedBeer2", te.getNestedBean2());
         else {
-            assertThat(fields(document, "nestedBeer2.id"), empty());
             assertThat(fields(document, "nestedBeer2.text"), empty());
         }
+        assertThat(fields(document, "text"), contains(text(te.getNestedBean3().getText())));
     }
 
     private void assertNestedBean(Document document, String name, NestedBean expected) {
-        assertThat(fields(document, name + ".id"), contains(
-                string(expected.getId())
-        ));
         assertThat(fields(document, name + ".text"), contains(
                 text(expected.getText())
         ));

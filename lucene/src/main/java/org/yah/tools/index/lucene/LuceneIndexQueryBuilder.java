@@ -6,9 +6,9 @@ import org.apache.lucene.document.IntPoint;
 import org.apache.lucene.document.LongPoint;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.queryparser.classic.ParseException;
-import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.search.*;
 import org.apache.lucene.util.QueryBuilder;
+import org.yah.tools.index.lucene.mapper.IndexableFieldType;
 import org.yah.tools.index.query.IndexQuery;
 import org.yah.tools.index.query.IndexQueryBuilder;
 import org.yah.tools.index.query.IndexSort;
@@ -26,6 +26,7 @@ class LuceneIndexQueryBuilder<T> implements IndexQueryBuilder {
 
     private final BooleanQuery.Builder queryBuilder;
     private final QueryBuilder fieldQueryBuilder;
+    private final Function<String, IndexableFieldType> fieldTypeSource;
 
     protected IndexSort sort = IndexSort.DEFAULT;
     protected int limit = Integer.MAX_VALUE;
@@ -35,19 +36,7 @@ class LuceneIndexQueryBuilder<T> implements IndexQueryBuilder {
         this.index = Objects.requireNonNull(index);
         queryBuilder = new BooleanQuery.Builder();
         fieldQueryBuilder = new QueryBuilder(index.analyzer);
-    }
-
-    LuceneIndexQueryBuilder(LuceneIndex<T> index, LuceneIndexQuery from) {
-        this(index);
-        sort = from.getSort();
-        limit = from.getLimit();
-
-        final Query fromQuery = from.getQuery();
-        if (fromQuery instanceof BooleanQuery) {
-            ((BooleanQuery) fromQuery).clauses().forEach(queryBuilder::add);
-        } else {
-            queryBuilder.add(fromQuery, BooleanClause.Occur.SHOULD);
-        }
+        fieldTypeSource = index.documentMapper::getFieldType;
     }
 
     @Override
@@ -83,8 +72,8 @@ class LuceneIndexQueryBuilder<T> implements IndexQueryBuilder {
     }
 
     @Override
-    public IndexQueryBuilder withKeyword(String fieldName, String keyword, Occur occur, float boost) {
-        queryBuilder.add(boost(new TermQuery(new Term(fieldName, keyword)), boost), createLuceneOccur(occur));
+    public IndexQueryBuilder withTerm(String fieldName, String term, Occur occur, float boost) {
+        queryBuilder.add(boost(new TermQuery(new Term(fieldName, term)), boost), createLuceneOccur(occur));
         return this;
     }
 
@@ -149,7 +138,7 @@ class LuceneIndexQueryBuilder<T> implements IndexQueryBuilder {
     public IndexQueryBuilder withQuery(String defaultField, String query, Occur occur, float boost) {
         final Query parsedQuery;
         try {
-            parsedQuery = new QueryParser(defaultField, index.analyzer).parse(query);
+            parsedQuery = new MappedEntityQueryParser(defaultField, index.analyzer, fieldTypeSource).parse(query);
         } catch (ParseException e) {
             throw new IllegalArgumentException(e);
         }

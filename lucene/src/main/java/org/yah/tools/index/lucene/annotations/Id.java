@@ -8,4 +8,13 @@ import java.lang.annotation.Target;
 @Target({ElementType.FIELD, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Id {
+    /**
+     * Alias of name()
+     */
+    String value() default "";
+
+    /**
+     * The indexed field name, default to bean property name
+     */
+    String name() default "";
 }

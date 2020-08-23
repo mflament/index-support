@@ -1,14 +1,13 @@
 package org.yah.tools.index.lucene;
 
 import org.apache.lucene.document.Document;
-import org.apache.lucene.document.Field;
-import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.store.Directory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.yah.tools.index.EntityIndexWriter;
 import org.yah.tools.index.IndexException;
 import org.yah.tools.index.query.IndexQuery;
 
@@ -17,12 +16,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.stream.Collectors;
 
-class LuceneIndexWriter<T> extends LuceneSupportObject<T> implements org.yah.tools.index.IndexWriter<T> {
+class LuceneIndexWriter<T> extends LuceneSupportObject<T> implements EntityIndexWriter<T>, AutoCloseable {
 
-
-    public static Term idTerm(String id) {
-        return new Term(LuceneIndex.ID_FIELD, id);
-    }
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LuceneIndexWriter.class);
 
@@ -65,7 +60,7 @@ class LuceneIndexWriter<T> extends LuceneSupportObject<T> implements org.yah.too
     public void delete(Collection<String> ids) {
         final Term[] terms = ids.stream()
                 .distinct()
-                .map(LuceneIndexWriter::idTerm)
+                .map(this::idTerm)
                 .toArray(Term[]::new);
         try {
             indexWriter.deleteDocuments(terms);
@@ -105,12 +100,7 @@ class LuceneIndexWriter<T> extends LuceneSupportObject<T> implements org.yah.too
     }
 
     private Document toDocument(T element) {
-        Document document = new Document();
-        index.documentMapper.toDocument(element, document);
-        document.add(new StringField(LuceneIndex.ID_FIELD,
-                index.documentMapper.getElementId(element),
-                Field.Store.NO));
-        return document;
+        return index.documentMapper.toDocument(element);
     }
 
     private void open() {

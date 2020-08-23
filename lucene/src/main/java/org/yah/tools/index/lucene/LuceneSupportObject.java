@@ -1,5 +1,6 @@
 package org.yah.tools.index.lucene;
 
+import org.apache.lucene.index.Term;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,6 +13,10 @@ abstract class LuceneSupportObject<T> {
 
     protected LuceneSupportObject(LuceneIndex<T> index) {
         this.index = Objects.requireNonNull(index);
+    }
+
+    protected final Term idTerm(String id) {
+        return new Term(index.documentMapper.getIdField(), id);
     }
 
     static void closeSafely(Object closeable) {

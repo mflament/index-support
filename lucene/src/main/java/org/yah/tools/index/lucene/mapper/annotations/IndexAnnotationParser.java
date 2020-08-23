@@ -8,8 +8,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yah.tools.index.lucene.annotations.*;
 import org.yah.tools.index.lucene.mapper.DefaultDocumentMapper;
+import org.yah.tools.index.lucene.mapper.IndexableFieldFactories;
 import org.yah.tools.index.lucene.mapper.IndexableFieldFactory;
-import org.yah.tools.index.lucene.mapper.SortableFieldFactory;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.*;
@@ -47,6 +47,7 @@ public final class IndexAnnotationParser<T> {
     private final Map<String, Class<? extends Analyzer>> analyzersClasses = new HashMap<>();
 
     private final LinkedList<NestedBeanSource> beanSources = new LinkedList<>();
+    private AnnotatedIdSource idSource;
 
     public IndexAnnotationParser(Builder<T> builder) {
         this.builder = Objects.requireNonNull(builder.builder);
@@ -66,7 +67,7 @@ public final class IndexAnnotationParser<T> {
         while (currentType != Object.class) {
             Class<?> typeClass = TypeUtils.getRawType(currentType, currentType);
             if (typeClass == null)
-                    throw new IllegalArgumentException("Coundl not get class from " + currentType);
+                throw new IllegalArgumentException("Coundl not get class from " + currentType);
             final Stream<? extends AccessibleObject> elements = Stream.concat(
                     Arrays.stream(typeClass.getDeclaredFields()),
                     Arrays.stream(typeClass.getDeclaredMethods())
@@ -79,10 +80,10 @@ public final class IndexAnnotationParser<T> {
 
     private Stream<AnnotatedSource> createSources(AnnotatedElement element) {
         final Id id = element.getAnnotation(Id.class);
-        final Collection<IndexField> fields = annotationsList(element,
-                IndexFields.class,
-                IndexField.class,
-                IndexFields::value);
+        final Collection<IndexedField> fields = annotationsList(element,
+                IndexedFields.class,
+                IndexedField.class,
+                IndexedFields::value);
         final Collection<SortedField> sortedFields = annotationsList(element,
                 SortedFields.class,
                 SortedField.class,
@@ -90,7 +91,13 @@ public final class IndexAnnotationParser<T> {
 
         List<AnnotatedSource> sources = new ArrayList<>();
         if (id != null) {
-            sources.add(new AnnotatedIdSource(element));
+            if (idSource != null) {
+                if (idSource.isSameDeclaringClass(element))
+                    LOGGER.warn("Found multiple id source fields: {}", List.of(element, idSource));
+            } else {
+                idSource = new AnnotatedIdSource(element, id);
+                sources.add(idSource);
+            }
         }
 
         fields.stream()
@@ -196,7 +203,8 @@ public final class IndexAnnotationParser<T> {
     }
 
     private <V> Function<T, V> unwrapOptional(Function<T, Optional<V>> accessor) {
-        return accessor.andThen(opt -> opt.orElse(null));
+        //noinspection OptionalAssignedToNull
+        return accessor.andThen(opt -> opt == null ? null : opt.orElse(null));
     }
 
     private IndexedFieldSource<T, ?> createFieldSource(AnnotatedElement element) {
@@ -215,20 +223,35 @@ public final class IndexAnnotationParser<T> {
         return (IndexedFieldSource<T, ?>) res;
     }
 
+    private static Class<?> getDeclaringClass(AnnotatedElement element) {
+        return ((Member) element).getDeclaringClass();
+    }
+
     private abstract class AnnotatedSource {
+
+        protected final AnnotatedElement element;
+
+        protected final String fieldName;
 
         protected final IndexedFieldSource<T, ?> fieldSource;
 
-
-        private AnnotatedSource(AnnotatedElement element) {
-            this(createFieldSource(element));
-        }
-
-        private AnnotatedSource(IndexedFieldSource<T, ?> fieldSource) {
-            this.fieldSource = fieldSource;
+        private AnnotatedSource(AnnotatedElement element, String... names) {
+            this.element = Objects.requireNonNull(element, "element is null");
+            this.fieldSource = createFieldSource(element);
+            final NestedBeanSource parent = beanSources.peekLast();
+            List<String> parts = new ArrayList<>();
+            if (parent != null && parent.fieldName != null)
+                parts.add(parent.fieldName);
+            parts.add(fieldName(names));
+            this.fieldName = String.join(".", parts);
         }
 
         public abstract void createFields();
+
+        @Override
+        public String toString() {
+            return fieldName + ": " + element.toString();
+        }
 
         protected final String fieldName(String... names) {
             return Arrays.stream(names)
@@ -240,8 +263,8 @@ public final class IndexAnnotationParser<T> {
     }
 
     private class AnnotatedIdSource extends AnnotatedSource {
-        public AnnotatedIdSource(AnnotatedElement element) {
-            super(element);
+        public AnnotatedIdSource(AnnotatedElement element, Id annotation) {
+            super(element, annotation.name(), annotation.value());
         }
 
         @Override
@@ -252,21 +275,19 @@ public final class IndexAnnotationParser<T> {
                 accessor = cast(fieldSource.accessor());
             else
                 accessor = fieldSource.accessor().andThen(Object::toString);
-            builder.withElementIdProvider(accessor);
+            builder.withIdField(fieldName, accessor);
         }
+
+        boolean isSameDeclaringClass(AnnotatedElement other) {
+            return getDeclaringClass(this.element) == getDeclaringClass(other);
+        }
+
     }
 
     private abstract class AnnotatedFieldSource extends AnnotatedSource {
 
-        protected final String fieldName;
-
         public AnnotatedFieldSource(AnnotatedElement element, String... names) {
-            super(element);
-            final NestedBeanSource parent = beanSources.peekLast();
-            if (parent != null)
-                this.fieldName = parent.fieldName + "." + fieldName(names);
-            else
-                this.fieldName = fieldName(names);
+            super(element, names);
         }
 
         @Override
@@ -368,10 +389,22 @@ public final class IndexAnnotationParser<T> {
 
     }
 
-    private class NestedBeanSource extends AnnotatedFieldSource {
+    private class NestedBeanSource extends AnnotatedSource {
+
+        private final String fieldName;
 
         public NestedBeanSource(AnnotatedElement element, Indexed indexed) {
-            super(element, indexed.name(), indexed.value());
+            super(element);
+            final NestedBeanSource parent = beanSources.peekLast();
+            List<String> names = new ArrayList<>();
+            if (parent != null && parent.fieldName != null)
+                names.add(parent.fieldName);
+            if (!indexed.flatten())
+                names.add(fieldName(indexed.name(), indexed.value()));
+            if (names.isEmpty())
+                this.fieldName = null;
+            else
+                this.fieldName = String.join(".", names);
         }
 
         @Override
@@ -382,28 +415,17 @@ public final class IndexAnnotationParser<T> {
             beanSources.removeLast();
         }
 
-        @Override
-        protected ResolvedFieldFactory<?> createFieldFactory(Type forType, boolean collection) {
-            throw new UnsupportedOperationException();
-        }
-
         public IndexedFieldSource<T, ?> createNestedFieldSource(IndexedFieldSource<?, ?> fieldSource) {
             return new NestedFieldSource<>(cast(this.fieldSource), cast(fieldSource));
         }
     }
 
     private class IndexFieldSource extends AnnotatedFieldSource {
-        private final IndexField indexField;
+        private final IndexedField indexField;
 
-        public IndexFieldSource(AnnotatedElement element, IndexField indexField) {
+        public IndexFieldSource(AnnotatedElement element, IndexedField indexField) {
             super(element, indexField.name(), indexField.value());
             this.indexField = indexField;
-        }
-
-        @Override
-        public void createFields() {
-            super.createFields();
-            configureAnalyzer();
         }
 
         @Override
@@ -415,41 +437,39 @@ public final class IndexAnnotationParser<T> {
                 fieldType = indexField.type();
             }
 
+            if (indexField.analyzer() != AutoAnalyzer.class) {
+                putAnalyzer(fieldName, indexField.analyzer());
+            } else if (fieldType == IndexedFieldType.KEYWORD) {
+                putAnalyzer(fieldName, KeywordAnalyzer.class);
+            }
+
             switch (fieldType) {
                 case KEYWORD:
                 case STRING:
-                    return ResolvedFieldFactory.fromString(IndexableFieldFactory.string);
+                    return ResolvedFieldFactory.fromString(IndexableFieldFactories.string);
                 case TEXT:
-                    return ResolvedFieldFactory.fromString(IndexableFieldFactory.text);
+                    return ResolvedFieldFactory.fromString(IndexableFieldFactories.text);
                 case POINT:
                     Class<? extends Number> numberType = numberType(forType);
                     if (numberType == null)
                         throw new IllegalArgumentException("type " + forType + " can not be converted to number");
-                    return ResolvedFieldFactory.fromNumber(IndexableFieldFactory.point(numberType));
+                    return ResolvedFieldFactory.fromNumber(IndexableFieldFactories.point(numberType));
                 case DOC_VALUES:
                     if (isAssignable(forType, String.class))
-                        return ResolvedFieldFactory.fromString(IndexableFieldFactory.stringDocValues);
+                        return ResolvedFieldFactory.fromString(IndexableFieldFactories.stringDocValues);
 
                     numberType = numberType(forType);
                     if (numberType != null) {
                         if (Long.class.isAssignableFrom(numberType) || Integer.class.isAssignableFrom(numberType))
-                            return ResolvedFieldFactory.fromNumber(IndexableFieldFactory.longDocValues);
+                            return ResolvedFieldFactory.fromNumber(IndexableFieldFactories.longDocValues);
                         if (Float.class.isAssignableFrom(numberType))
-                            return ResolvedFieldFactory.fromNumber(IndexableFieldFactory.floatDocValues);
+                            return ResolvedFieldFactory.fromNumber(IndexableFieldFactories.floatDocValues);
                         if (Double.class.isAssignableFrom(numberType))
-                            return ResolvedFieldFactory.fromNumber(IndexableFieldFactory.doubleDocValues);
+                            return ResolvedFieldFactory.fromNumber(IndexableFieldFactories.doubleDocValues);
                     }
                     throw new IllegalArgumentException("type " + forType + " can not be converted to number");
                 default:
                     throw new IllegalArgumentException(fieldType.toString());
-            }
-        }
-
-        private void configureAnalyzer() {
-            if (indexField.analyzer() != AutoAnalyzer.class) {
-                putAnalyzer(fieldName, indexField.analyzer());
-            } else if (indexField.type() == IndexedFieldType.KEYWORD) {
-                putAnalyzer(fieldName, KeywordAnalyzer.class);
             }
         }
     }
@@ -468,12 +488,12 @@ public final class IndexAnnotationParser<T> {
             }
 
             if (isAssignable(forType, String.class)) {
-                return ResolvedFieldFactory.fromString(SortableFieldFactory.sortedText);
+                return ResolvedFieldFactory.fromString(IndexableFieldFactories.sortedText);
             }
 
             final Class<? extends Number> numberType = numberType(forType);
             if (numberType != null) {
-                return ResolvedFieldFactory.fromNumber(SortableFieldFactory.number(numberType));
+                return ResolvedFieldFactory.fromNumber(IndexableFieldFactories.sortedNumber(numberType));
             }
 
             throw new IllegalArgumentException("Unable to create SortableFieldFactory for type " + forType);

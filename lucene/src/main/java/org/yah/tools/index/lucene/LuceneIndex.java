@@ -1,38 +1,46 @@
 package org.yah.tools.index.lucene;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.LockObtainFailedException;
-import org.yah.tools.index.Index;
-import org.yah.tools.index.IndexException;
-import org.yah.tools.index.IndexWriter;
-import org.yah.tools.index.lucene.mapper.DefaultDocumentMapper;
+import org.yah.tools.index.*;
 import org.yah.tools.index.lucene.mapper.DocumentMapper;
-import org.yah.tools.index.lucene.mapper.annotations.IndexAnnotationParser;
+import org.yah.tools.index.lucene.mapper.EntityDocumentMapper;
+import org.yah.tools.index.lucene.mapper.WrappedDocumentMapper;
+import org.yah.tools.index.lucene.mapper.WrappedEntityDocumentMapper;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
-public class LuceneIndex<T> implements Index<T> {
-    public static final String ID_FIELD = "_id";
+public class LuceneIndex<T> implements EntityIndex<T>, AutoCloseable {
 
-    final Path path;
-    final Analyzer analyzer;
-    final DocumentMapper<T> documentMapper;
+    protected final Path path;
+    protected final Analyzer analyzer;
+    protected final EntityDocumentMapper<T> documentMapper;
+
+    protected LuceneIndexReader<T> reader;
+    protected LuceneIndexWriter<T> writer;
 
     public LuceneIndex(Path path, Analyzer analyzer, DocumentMapper<T> documentMapper) {
         this.path = Objects.requireNonNull(path);
         this.analyzer = Objects.requireNonNull(analyzer);
-        this.documentMapper = Objects.requireNonNull(documentMapper);
+        Objects.requireNonNull(documentMapper, "documentMapper is null");
+        if (documentMapper instanceof EntityDocumentMapper) {
+            this.documentMapper = new WrappedEntityDocumentMapper<>((EntityDocumentMapper<T>) documentMapper);
+        } else {
+            this.documentMapper = new WrappedDocumentMapper<>(documentMapper);
+        }
+    }
+
+    public boolean isEntityIndex() {
+        return documentMapper instanceof WrappedEntityDocumentMapper;
     }
 
     public Path getPath() {
@@ -43,35 +51,43 @@ public class LuceneIndex<T> implements Index<T> {
         return analyzer;
     }
 
-    public DocumentMapper<T> getDocumentMapper() {
+    public EntityDocumentMapper<T> getDocumentMapper() {
         return documentMapper;
     }
 
     @Override
-    public LuceneIndexWriter<T> openWriter() {
-        return new LuceneIndexWriter<>(this);
+    public void close() {
+        reader = closeSafely(reader);
+        writer = closeSafely(writer);
     }
 
     @Override
-    public LuceneIndexReader<T> openReader() {
-        return new LuceneIndexReader<>(this);
+    public synchronized EntityIndexWriter<T> writer() {
+        if (writer == null) {
+            writer = new LuceneIndexWriter<>(this);
+            reader = closeSafely(reader);
+        }
+        return writer;
     }
 
     @Override
-    public LuceneIndexReader<T> openReader(IndexWriter<T> writer) {
-        if (writer == null)
-            return openReader();
-        return new LuceneIndexReader<>((LuceneIndexWriter<T>) writer);
+    public synchronized EntityIndexReader<T> reader() {
+        if (reader == null) {
+            if (writer != null)
+                reader = new LuceneIndexReader<>(writer);
+            else
+                reader = new LuceneIndexReader<>(this);
+        }
+        return reader;
     }
 
     @Override
     public <V> void reindex(Index<V> target,
                             Function<T, V> mapper,
                             ProgressCallback progressCallback) {
-        try (final LuceneIndexReader<T> reader = openReader();
-             final IndexWriter<V> writer = target.openWriter()) {
-            reader.reindex(writer, mapper, progressCallback);
-        }
+        final LuceneIndexReader<T> reader = (LuceneIndexReader<T>) reader();
+        final IndexWriter<V> writer = target.writer();
+        reader.reindex(writer, mapper, progressCallback);
     }
 
     public <V> LuceneIndex<V> reindex(Function<T, V> mapper,
@@ -82,6 +98,9 @@ public class LuceneIndex<T> implements Index<T> {
         delete(targetPath);
         LuceneIndex<V> target = new LuceneIndex<>(targetPath, analyzer, documentMapper);
         reindex(target, mapper, progressCallback);
+
+        close();
+        target.close();
         target.moveTo(this.path);
         return new LuceneIndex<>(path, analyzer, documentMapper);
     }
@@ -99,10 +118,10 @@ public class LuceneIndex<T> implements Index<T> {
         return directory;
     }
 
-    private void moveTo(Path path) {
-        list(path, Files::delete);
-        list(this.path, s -> Files.move(s, path.resolve(s.getFileName())));
-        delete(this.path);
+    private void moveTo(Path targetPath) {
+        list(targetPath, Files::delete);
+        list(path, s -> Files.move(s, targetPath.resolve(s.getFileName())));
+        delete(path);
     }
 
     private static void tryCreate(Directory directory) throws IOException {
@@ -140,6 +159,18 @@ public class LuceneIndex<T> implements Index<T> {
         }
     }
 
+    private static <T> T closeSafely(T object) {
+        if (object instanceof AutoCloseable) {
+            try {
+                ((AutoCloseable) object).close();
+                return null;
+            } catch (Exception e) {
+                //ignore
+            }
+        }
+        return object;
+    }
+
 
     private interface PathConsumer extends Consumer<Path> {
         default void accept(Path p) {
@@ -152,7 +183,5 @@ public class LuceneIndex<T> implements Index<T> {
 
         void acceptPath(Path path) throws IOException;
     }
-
-
 
 }

@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.Module;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.StoredField;
-import org.apache.lucene.search.SortField;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yah.tools.index.IndexException;
@@ -16,7 +15,7 @@ import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
-public class DefaultDocumentMapper<T> implements DocumentMapper<T> {
+public class DefaultDocumentMapper<T> implements EntityDocumentMapper<T> {
 
     public static <T> Builder<T> builder(Class<T> type) {
         return new Builder<>(type);
@@ -26,26 +25,28 @@ public class DefaultDocumentMapper<T> implements DocumentMapper<T> {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultDocumentMapper.class);
     private static final String JSON_FIELD = "source";
+
     private final Class<T> type;
     private final ObjectMapper objectMapper;
     private final List<IndexedField<T>> indexedFields;
+
+    private final String idField;
     private final Function<T, String> elementIdProvider;
 
     public DefaultDocumentMapper(Builder<T> builder) {
         this.type = Objects.requireNonNull(builder.type);
         this.objectMapper = builder.objectMapper == null ? DEFAULT_OBJECT_MAPPER : builder.objectMapper;
         this.indexedFields = List.copyOf(builder.indexedFields);
-        this.elementIdProvider = Objects.requireNonNull(builder.elementIdProvider);
-    }
-
-    Collection<IndexedField<T>> getIndexedFields() {
-        return List.copyOf(indexedFields);
+        this.elementIdProvider = builder.elementIdProvider;
+        this.idField = builder.idField;
     }
 
     @Override
-    public void toDocument(T element, Document document) {
+    public Document toDocument(T element) {
+        Document document = new Document();
         addJSON(element, document);
         indexedFields.forEach(indexedField -> indexedField.update(element, document));
+        return document;
     }
 
     @Override
@@ -62,16 +63,32 @@ public class DefaultDocumentMapper<T> implements DocumentMapper<T> {
     }
 
     @Override
-    public String getElementId(T element) {
-        return elementIdProvider.apply(element);
+    public String getIdField() {
+        return idField;
     }
 
     @Override
-    public Optional<SortField.Type> getSortType(String field) {
+    public String getElementId(T element) {
+        if (elementIdProvider == null)
+            throw new UnsupportedOperationException("No elementIdProvider");
+        return elementIdProvider.apply(element);
+    }
+
+    public boolean isEntityDocumentMapper() {
+        return elementIdProvider != null;
+    }
+
+    @Override
+    public IndexableFieldType getFieldType(String field) {
         return indexedFields.stream()
                 .filter(f -> f.getName().equals(field))
                 .findFirst()
-                .flatMap(f -> f.getSortType());
+                .map(IndexedField::getType)
+                .orElseThrow(() -> new IllegalArgumentException("field '" + field + "' was not found"));
+    }
+
+    Collection<IndexedField<T>> getIndexedFields() {
+        return List.copyOf(indexedFields);
     }
 
     private static ObjectMapper createDefaultObjectMapper() {
@@ -114,12 +131,14 @@ public class DefaultDocumentMapper<T> implements DocumentMapper<T> {
         document.add(new StoredField(JSON_FIELD, json));
     }
 
-
+    @SuppressWarnings({"unused", "UnusedReturnValue"})
     public static final class Builder<T> {
 
         private final Class<T> type;
         private final Collection<IndexedField<T>> indexedFields = new ArrayList<>();
         private ObjectMapper objectMapper;
+
+        private String idField;
         private Function<T, String> elementIdProvider;
 
         private Builder(Class<T> type) {
@@ -150,7 +169,7 @@ public class DefaultDocumentMapper<T> implements DocumentMapper<T> {
                         .filter(Objects::nonNull)
                         .forEach(doc::add);
             };
-            indexedFields.add(new IndexedField<>(name, updater, null));
+            indexedFields.add(new IndexedField<>(name, factory.getType(), updater));
             return this;
         }
 
@@ -169,13 +188,13 @@ public class DefaultDocumentMapper<T> implements DocumentMapper<T> {
         public <V> Builder<T> withNullableField(String name,
                                                 Function<T, V> provider,
                                                 IndexableFieldFactory<V> factory) {
-            return withIndexedField(name, provider, IndexableFieldFactory.nullable(factory));
+            return withIndexedField(name, provider, IndexableFieldFactories.nullable(factory));
         }
 
         public <V> Builder<T> withOptionalField(String name,
                                                 Function<T, Optional<V>> provider,
                                                 IndexableFieldFactory<V> factory) {
-            return withIndexedField(name, provider, IndexableFieldFactory.optional(factory));
+            return withIndexedField(name, provider, IndexableFieldFactories.optional(factory));
         }
 
         public <V> Builder<T> withFields(Function<T, V> provider, DefaultDocumentMapper<V> delegate) {
@@ -185,8 +204,9 @@ public class DefaultDocumentMapper<T> implements DocumentMapper<T> {
             return this;
         }
 
-        public Builder<T> withElementIdProvider(Function<T, String> elementQueryFactory) {
-            this.elementIdProvider = elementQueryFactory;
+        public Builder<T> withIdField(String idField, Function<T, String> elementIdProvider) {
+            this.idField = Objects.requireNonNull(idField, "idField is null");
+            this.elementIdProvider = Objects.requireNonNull(elementIdProvider, "elementIdProvider is null");
             return this;
         }
 
@@ -200,7 +220,7 @@ public class DefaultDocumentMapper<T> implements DocumentMapper<T> {
                 if (v != null)
                     delegate.update(v, doc);
             };
-            return new IndexedField<>(delegate.getName(), updater, delegate.getSortType().orElse(null));
+            return new IndexedField<>(delegate.getName(), delegate.getType(), updater);
         }
     }
 }

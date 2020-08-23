@@ -1,6 +1,5 @@
 package org.yah.tools.index.lucene.mapper;
 
-import org.yah.tools.index.IndexHolder;
 import org.yah.tools.index.IndexWriter;
 import org.yah.tools.index.lucene.LuceneIndex;
 import org.yah.tools.index.lucene.LuceneIndexFactory;
@@ -24,25 +23,25 @@ public class Sandbox implements AutoCloseable {
     }
 
     private void readEntities() {
-        System.out.println(indexHolder.reader().count() + " entities found");
+        System.out.println(index.reader().count() + " entities found");
     }
 
-    private final IndexHolder<TestEntity> indexHolder;
+    private final LuceneIndex<TestEntity> index;
 
     public Sandbox(LuceneIndex<TestEntity> index) {
-        this.indexHolder = new IndexHolder<>(index);
+        this.index = index;
     }
 
     @Override
     public void close() {
-        indexHolder.close();
+        index.close();
     }
 
     private void createEntities(int count) {
         final Supplier<TestEntity> supplier = TestEntity.randomEntities(new Random());
         List<TestEntity> entities =new ArrayList<>(count);
         while (entities.size() < count) entities.add(supplier.get());
-        final IndexWriter<TestEntity> writer = indexHolder.writer();
+        final IndexWriter<TestEntity> writer = index.writer();
         writer.add(entities);
     }
 

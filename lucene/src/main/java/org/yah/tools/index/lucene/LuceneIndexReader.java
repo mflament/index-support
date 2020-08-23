@@ -9,15 +9,16 @@ import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.store.Directory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.yah.tools.index.EntityIndexReader;
 import org.yah.tools.index.Index.ProgressCallback;
 import org.yah.tools.index.IndexException;
-import org.yah.tools.index.IndexReader;
 import org.yah.tools.index.query.IndexCursor;
 import org.yah.tools.index.query.IndexQuery;
 import org.yah.tools.index.query.IndexQueryBuilder;
 import org.yah.tools.index.query.ScoredElement;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -27,7 +28,7 @@ import java.util.function.Function;
 
 import static org.apache.lucene.search.BooleanClause.Occur.SHOULD;
 
-class LuceneIndexReader<T> extends LuceneSupportObject<T> implements IndexReader<T> {
+class LuceneIndexReader<T> extends LuceneSupportObject<T> implements EntityIndexReader<T>, AutoCloseable {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LuceneIndexReader.class);
 
@@ -64,7 +65,7 @@ class LuceneIndexReader<T> extends LuceneSupportObject<T> implements IndexReader
     public Collection<T> find(Collection<String> ids) {
         BooleanQuery.Builder builder = new BooleanQuery.Builder();
         ids.stream()
-                .map(LuceneIndexWriter::idTerm)
+                .map(this::idTerm)
                 .map(TermQuery::new)
                 .map(termQuery -> new BooleanClause(termQuery, SHOULD))
                 .forEach(builder::add);
@@ -95,6 +96,16 @@ class LuceneIndexReader<T> extends LuceneSupportObject<T> implements IndexReader
         try (IndexCursor<T> cursor = query(query, 1)) {
             if (cursor.hasNext()) return Optional.of(cursor.next());
             return Optional.empty();
+        }
+    }
+
+    @Override
+    public int count(IndexQuery query) {
+        final LuceneIndexQuery luceneQuery = LuceneIndexQuery.cast(query);
+        try (ReaderInstance readerInstance = open()) {
+            return readerInstance.searcher.count(luceneQuery.getQuery());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
